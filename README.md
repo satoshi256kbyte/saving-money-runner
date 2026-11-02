@@ -43,6 +43,7 @@ corepack pnpm format:check
 corepack pnpm lint
 corepack pnpm typecheck
 corepack pnpm test
+corepack pnpm foundation:check
 corepack pnpm docs:check
 corepack pnpm cdk:check
 corepack pnpm ministack:check
@@ -73,5 +74,5 @@ GitHub Actionsの`quality`ワークフローは、依存関係をlockfileから�
 5. `analyze`
 6. `implement`
 
-`clarify`と`analyze`を省略せず、CriticalまたはHighの指摘を解消してから実装へ進みます。
+`clarify`と`analyze`を省略せず、Critical、High、またはMediumの指摘を解消してから実装へ進みます。
 Issue #1の成果物は`specs/001-development-foundation/`にあります。
