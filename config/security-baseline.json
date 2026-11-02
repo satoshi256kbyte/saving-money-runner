@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "scope": "saving-money-runner-mvp",
+  "controls": [
+    {
+      "id": "SEC-001",
+      "category": "webhook",
+      "requirement": "raw bodyのHMAC署名を定数時間比較で検証する",
+      "verification": "署名不正とraw body改変の拒否テスト",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-002",
+      "category": "webhook",
+      "requirement": "イベントのリプレイと重複処理を拒否または冪等に収束させる",
+      "verification": "同一イベントIDと期限切れイベントのテスト",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-003",
+      "category": "webhook",
+      "requirement": "外部入力を形式、サイズ、許可値で検証する",
+      "verification": "不正形式、過大入力、許可外URLの拒否テスト",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-004",
+      "category": "identity",
+      "requirement": "GitHub Appと短命トークンを必要最小限に限定する",
+      "verification": "App権限とトークン用途の契約検査",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-005",
+      "category": "iam",
+      "requirement": "Lambda、ランナー、AMIビルド、運用者のAWS権限を分離する",
+      "verification": "IAM PolicyのActionとResourceの最小権限検査",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-006",
+      "category": "network",
+      "requirement": "ランナーをPrivate Subnetへ配置し外部Inboundを許可しない",
+      "verification": "Public IP、Inbound、TLS設定の構成検査",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-007",
+      "category": "secret",
+      "requirement": "Secret、トークン、顧客識別情報、未マスクARNを公開経路へ出さない",
+      "verification": "ログ、出力、Issue、成果物のマスキング検査",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-008",
+      "category": "runner",
+      "requirement": "ランナーを1ジョブで使い捨てジョブ後に一時情報を破棄する",
+      "verification": "ジョブ終了、失敗、強制終了後の残存検査",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-009",
+      "category": "image",
+      "requirement": "検査と承認を通過したAMI世代だけを配布する",
+      "verification": "未承認、検査失敗、世代不一致の拒否テスト",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-010",
+      "category": "audit",
+      "requirement": "監査証跡、相関ID、レート制限、上限、コスト異常検知を備える",
+      "verification": "CloudTrail、CloudWatch、上限超過、濫用時停止の検査",
+      "release_blocker": true
+    }
+  ]
+}

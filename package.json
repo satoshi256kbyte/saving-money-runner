@@ -14,9 +14,10 @@
     "cdk:synth": "corepack pnpm exec cdk synth --app 'tsx cdk/bin/app.ts' --output cdk.out --quiet",
     "cdk:check": "node scripts/quality/run-cdk-check.mjs",
     "ministack:check": "node scripts/quality/check-ministack.mjs",
-    "docs:check": "markdownlint-cli2 AGENTS.md README.md 'specs/**/*.md'",
+    "security:check": "node scripts/quality/check-security-baseline.mjs",
+    "docs:check": "markdownlint-cli2 AGENTS.md README.md 'docs/**/*.md' 'specs/**/*.md'",
     "foundation:check": "node scripts/quality/check-structure.mjs",
-    "quality": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm foundation:check && corepack pnpm docs:check && corepack pnpm cdk:check && corepack pnpm ministack:check"
+    "quality": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm foundation:check && corepack pnpm security:check && corepack pnpm docs:check && corepack pnpm cdk:check && corepack pnpm ministack:check"
   },
   "dependencies": {
     "aws-cdk-lib": "2.177.0",
