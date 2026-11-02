@@ -1,0 +1,7 @@
+{
+  "app": "tsx cdk/bin/app.ts",
+  "output": "cdk.out",
+  "context": {
+    "projectName": "saving-money-runner"
+  }
+}

@@ -1,0 +1,15 @@
+services:
+  ministack:
+    image: localstack/localstack:4.8.1
+    environment:
+      AWS_DEFAULT_REGION: ap-northeast-1
+      DEBUG: '0'
+      PERSISTENCE: '0'
+      SERVICES: s3,lambda,apigateway,ec2,autoscaling,secretsmanager,cloudwatch,logs
+    ports:
+      - '4566:4566'
+    volumes:
+      - ministack-data:/var/lib/localstack
+
+volumes:
+  ministack-data:
