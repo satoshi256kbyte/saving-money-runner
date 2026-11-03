@@ -79,3 +79,7 @@ if (!outputDescriptions.some((description) => description.includes('App名'))) {
   console.error('GitHub App名の出力がありません');
   process.exit(1);
 }
+if (!Object.keys(template.Outputs ?? {}).some((key) => key.includes('GitHubAppWebhookUrl'))) {
+  console.error('GitHubAppWebhookUrlの出力がありません');
+  process.exit(1);
+}

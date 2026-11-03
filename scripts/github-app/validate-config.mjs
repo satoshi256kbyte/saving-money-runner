@@ -16,11 +16,58 @@ const allowedConfigKeys = new Set([
   'webhookSecretName',
   'adminRoleArn',
   'additionalReaderRoleArns',
+  'webhookReceiver',
 ]);
 // 公開テキストの秘密情報検査に合わせ、ARNの接頭辞は組み立てて表す。
 const arnPrefix = ['arn', 'aws', 'iam'].join(':');
 const roleArnPattern = new RegExp(`^${arnPrefix}::[0-9]{12}:role/[\\w+=,.@/-]+$`, 'u');
 const allowedPermissionKeys = new Set(Object.keys(requiredPermissions));
+// 既定値はJ-3の6 MB。設定例には書かず、読込み側で既定を補う。
+export const DEFAULT_MAX_BODY_BYTES = 6291456;
+// J-2の3項目は顧客ごとに決めるため、設定例ではnullを許す。null の拒否はデプロイ経路だけが行う。
+const webhookReceiverRequiredKeys = ['rateLimit', 'burstLimit', 'reservedConcurrency'];
+const allowedWebhookReceiverKeys = new Set([...webhookReceiverRequiredKeys, 'maxBodyBytes']);
+
+function isPositiveInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+/**
+ * エラーメッセージに値を含めない。顧客ごとの上限値を、検証の出力（CI のログ）へ残さないため。
+ */
+function validateWebhookReceiver(webhookReceiver) {
+  if (!webhookReceiver || typeof webhookReceiver !== 'object' || Array.isArray(webhookReceiver)) {
+    throw new Error('webhookReceiverを指定してください');
+  }
+  const unknownKeys = Object.keys(webhookReceiver).filter(
+    (key) => !allowedWebhookReceiverKeys.has(key),
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(`未許可のwebhookReceiver設定キーです: ${unknownKeys.join(', ')}`);
+  }
+  for (const key of webhookReceiverRequiredKeys) {
+    if (!Object.hasOwn(webhookReceiver, key)) {
+      throw new Error(`webhookReceiverの必須項目がありません: ${key}`);
+    }
+    const value = webhookReceiver[key];
+    if (value !== null && !isPositiveInteger(value)) {
+      throw new Error(`webhookReceiver.${key} は正の整数またはnullで指定してください`);
+    }
+  }
+  if (Object.hasOwn(webhookReceiver, 'maxBodyBytes')) {
+    const { maxBodyBytes } = webhookReceiver;
+    if (!isPositiveInteger(maxBodyBytes) || maxBodyBytes > DEFAULT_MAX_BODY_BYTES) {
+      throw new Error(
+        `webhookReceiver.maxBodyBytes は1以上${DEFAULT_MAX_BODY_BYTES}以下の整数で指定してください`,
+      );
+    }
+  }
+  const { rateLimit, burstLimit } = webhookReceiver;
+  // 両方が決まっているときだけ比べる。未決（null）の組は、デプロイ経路の拒否に任せる。
+  if (rateLimit !== null && burstLimit !== null && burstLimit < rateLimit) {
+    throw new Error('webhookReceiver.burstLimit は rateLimit 以上で指定してください');
+  }
+}
 
 function rejectForbiddenKeys(value, path = 'config') {
   if (!value || typeof value !== 'object') {
@@ -97,6 +144,7 @@ export function validateGitHubAppConfig(config) {
   if (config.webhookSecretName !== 'saving-money-runner/github-app/webhook') {
     throw new Error('Webhook Secret名は固定契約と一致しません');
   }
+  validateWebhookReceiver(config.webhookReceiver);
   // 実値のARNは顧客の口座情報を含むため、設定例はプレースホルダーのままにする。
   if (config.adminRoleArn !== '<ADMIN_ROLE_ARN>' && !roleArnPattern.test(config.adminRoleArn)) {
     throw new Error('管理者ロールARNが不正です');

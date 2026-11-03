@@ -25,6 +25,7 @@ const stack = new FoundationStack(app, 'FoundationStack', {
   githubAppName: 'saving-money-runner',
   adminRoleArn: ${JSON.stringify(adminRoleArn)},
   additionalReaderRoleArns: ${JSON.stringify(additionalReaderRoleArns)},
+  webhookReceiver: { rateLimit: 10, burstLimit: 20, reservedConcurrency: 5, maxBodyBytes: 6291456 },
 });
 const template = Template.fromStack(stack);
 process.stdout.write(JSON.stringify(template.toJSON()));
@@ -44,6 +45,16 @@ function secretDenyStatement(template) {
   );
   assert.ok(resourcePolicy, 'Secretのリソースポリシーがない');
   return resourcePolicy.Properties.ResourcePolicy.Statement.find((item) => item.Effect === 'Deny');
+}
+
+// 受信ロールはStack内で作るためARNがトークンになる。論理IDの参照で照合する。
+function webhookRoleRef(template) {
+  const roleId = Object.keys(template.Resources).find(
+    (key) =>
+      template.Resources[key].Type === 'AWS::IAM::Role' && key.includes('WebhookReceiverRole'),
+  );
+  assert.ok(roleId, 'Webhook受信ロールがない');
+  return { 'Fn::GetAtt': [roleId, 'Arn'] };
 }
 
 const template = synthTemplate([]);
@@ -82,12 +93,15 @@ test('Organization・App名のOutputは入力値を参照し、Secret実値を�
   assert.doesNotMatch(JSON.stringify(template.Outputs), /SecretString/u);
 });
 
-test('Secretの読取りは管理者ロールだけに限定し、それ以外のGetSecretValueを拒否する', () => {
+test('Secretの読取りは管理者ロールと受信ロールだけに限定し、それ以外のGetSecretValueを拒否する', () => {
   const statement = secretDenyStatement(template);
   assert.deepEqual(statement.Action, 'secretsmanager:GetSecretValue');
   const [logicalId] = secrets[0];
   assert.deepEqual(statement.Resource, { Ref: logicalId });
-  assert.deepEqual(statement.Condition.ArnNotLike['aws:PrincipalArn'], [adminRoleArn]);
+  assert.deepEqual(statement.Condition.ArnNotLike['aws:PrincipalArn'], [
+    adminRoleArn,
+    webhookRoleRef(template),
+  ]);
 });
 
 test('Webhook処理ロールを追加すると、Secretの読取り許可に管理者と並べて含まれる', () => {
@@ -101,6 +115,7 @@ test('Webhook処理ロールを追加すると、Secretの読取り許可に管�
   assert.deepEqual(secretDenyStatement(extended).Condition.ArnNotLike['aws:PrincipalArn'], [
     adminRoleArn,
     extraRole,
+    webhookRoleRef(extended),
   ]);
 });
 

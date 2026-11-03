@@ -9,5 +9,10 @@
   "webhookEvents": ["workflow_job"],
   "webhookSecretName": "saving-money-runner/github-app/webhook",
   "adminRoleArn": "<ADMIN_ROLE_ARN>",
-  "additionalReaderRoleArns": []
+  "additionalReaderRoleArns": [],
+  "webhookReceiver": {
+    "rateLimit": null,
+    "burstLimit": null,
+    "reservedConcurrency": null
+  }
 }
