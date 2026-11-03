@@ -13,6 +13,8 @@ const requiredFiles = [
   'config/security-baseline.json',
   'docs/04-脅威モデルとセキュリティ基準.md',
   'scripts/quality/check-security-baseline.mjs',
+  'scripts/quality/security-baseline-files.mjs',
+  'scripts/quality/security-baseline-policy.mjs',
   'README.md',
   'AGENTS.md',
   '.github/CODEOWNERS',

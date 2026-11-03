@@ -71,6 +71,20 @@
       "requirement": "監査証跡、相関ID、レート制限、上限、コスト異常検知を備える",
       "verification": "CloudTrail、CloudWatch、上限超過、濫用時停止の検査",
       "release_blocker": true
+    },
+    {
+      "id": "SEC-011",
+      "category": "boundary",
+      "requirement": "顧客Organizationと顧客AWSアカウントを他顧客から分離し、信頼境界を越える値を検証する",
+      "verification": "Organization、AWSアカウント、Repositoryの越境参照拒否テスト",
+      "release_blocker": true
+    },
+    {
+      "id": "SEC-012",
+      "category": "availability",
+      "requirement": "レート制限、同時実行上限、コスト上限を設け、濫用時に新規処理を停止する",
+      "verification": "レート超過、同時実行上限、コスト上限超過の停止検査",
+      "release_blocker": true
     }
   ]
 }
