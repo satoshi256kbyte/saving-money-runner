@@ -92,7 +92,7 @@ const dynamoFake = (id) => {
           throw failure('UnexpectedExpression', 'unknown condition for PutItem');
         }
         const values = input.ExpressionAttributeValues;
-        const key = input.Item.deliveryId.S;
+        const key = input.Item.bodyDigest.S;
         const existing = items.get(key);
         const nowSeconds = Number(values[':nowSeconds'].N);
         const nowMs = Number(values[':nowMs'].N);
@@ -115,7 +115,7 @@ const dynamoFake = (id) => {
         if (input.UpdateExpression !== 'SET #state = :done') {
           throw failure('UnexpectedExpression', 'unknown update expression');
         }
-        const key = input.Key.deliveryId.S;
+        const key = input.Key.bodyDigest.S;
         const existing = items.get(key);
         if (!leaseMatches(existing, input.ExpressionAttributeValues)) {
           throw failure('ConditionalCheckFailedException', 'lease does not match');
@@ -127,7 +127,7 @@ const dynamoFake = (id) => {
         if (input.ConditionExpression !== expressions.LEASE_MATCH_CONDITION_EXPRESSION) {
           throw failure('UnexpectedExpression', 'unknown condition for DeleteItem');
         }
-        const key = input.Key.deliveryId.S;
+        const key = input.Key.bodyDigest.S;
         const existing = items.get(key);
         if (!leaseMatches(existing, input.ExpressionAttributeValues)) {
           throw failure('ConditionalCheckFailedException', 'lease does not match');

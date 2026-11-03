@@ -9,9 +9,10 @@ import {
 import type { DedupeRecord, DedupeStore, ReserveResult } from './types';
 
 // 確保の条件。dedupe.ts の isAvailableForReservation と同じ条件を、DynamoDB の式で書く。
+// キーは bodyDigest（本文のSHA-256）。配信IDは再配信で変わりうるため、キーにすると同じ本文の再送を止められない。
 // expiresAt は秒、leaseUntil は ミリ秒で保存する。秒の比較は :nowSeconds（小数点以下3桁のミリ秒つき）で行う。
 export const RESERVE_CONDITION_EXPRESSION =
-  'attribute_not_exists(deliveryId) OR expiresAt < :nowSeconds OR (#state = :processing AND leaseUntil < :nowMs)';
+  'attribute_not_exists(bodyDigest) OR expiresAt < :nowSeconds OR (#state = :processing AND leaseUntil < :nowMs)';
 
 // 解放と完了の条件。確保した試行の leaseUntil が一致するときだけ変更する（他の試行の状態を変えないため）。
 export const LEASE_MATCH_CONDITION_EXPRESSION = '#state = :processing AND leaseUntil = :leaseUntil';
@@ -32,6 +33,7 @@ export function createDynamoDedupeStore(options: DynamoDedupeOptions): DedupeSto
           new PutItemCommand({
             TableName: tableName,
             Item: {
+              bodyDigest: { S: record.bodyDigest },
               deliveryId: { S: record.deliveryId },
               state: { S: record.state },
               leaseUntil: { N: String(record.leaseUntil) },
@@ -56,12 +58,12 @@ export function createDynamoDedupeStore(options: DynamoDedupeOptions): DedupeSto
       }
     },
 
-    async markDone(deliveryId: string, leaseUntil: number): Promise<void> {
+    async markDone(bodyDigest: string, leaseUntil: number): Promise<void> {
       // 条件に合わない場合は例外のまま渡す。呼び出し側（ハンドラー）が確保を解放して503にする。
       await client.send(
         new UpdateItemCommand({
           TableName: tableName,
-          Key: { deliveryId: { S: deliveryId } },
+          Key: { bodyDigest: { S: bodyDigest } },
           UpdateExpression: 'SET #state = :done',
           ConditionExpression: LEASE_MATCH_CONDITION_EXPRESSION,
           ExpressionAttributeNames: { '#state': 'state' },
@@ -74,12 +76,12 @@ export function createDynamoDedupeStore(options: DynamoDedupeOptions): DedupeSto
       );
     },
 
-    async release(deliveryId: string, leaseUntil: number): Promise<void> {
+    async release(bodyDigest: string, leaseUntil: number): Promise<void> {
       try {
         await client.send(
           new DeleteItemCommand({
             TableName: tableName,
-            Key: { deliveryId: { S: deliveryId } },
+            Key: { bodyDigest: { S: bodyDigest } },
             ConditionExpression: LEASE_MATCH_CONDITION_EXPRESSION,
             ExpressionAttributeNames: { '#state': 'state' },
             ExpressionAttributeValues: {
@@ -117,12 +119,14 @@ function readItem(error: unknown): Record<string, AttributeValue> {
 
 // 保存された項目を DedupeRecord にする。形式が合わなければ例外にする（判定の根拠が無いため）。
 function toRecord(item: Record<string, AttributeValue>): DedupeRecord {
+  const bodyDigest = item.bodyDigest?.S;
   const deliveryId = item.deliveryId?.S;
   const state = item.state?.S;
   const receivedAt = item.receivedAt?.S;
   const leaseUntil = Number(item.leaseUntil?.N);
   const expiresAt = Number(item.expiresAt?.N);
   if (
+    bodyDigest === undefined ||
     deliveryId === undefined ||
     (state !== 'processing' && state !== 'done') ||
     receivedAt === undefined ||
@@ -131,7 +135,7 @@ function toRecord(item: Record<string, AttributeValue>): DedupeRecord {
   ) {
     throw new Error('stored dedupe item has an unexpected shape');
   }
-  return { deliveryId, state, leaseUntil, receivedAt, expiresAt };
+  return { bodyDigest, deliveryId, state, leaseUntil, receivedAt, expiresAt };
 }
 
 function isNamed(error: unknown, name: string): boolean {

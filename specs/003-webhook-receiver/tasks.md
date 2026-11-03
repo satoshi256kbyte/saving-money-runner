@@ -267,9 +267,9 @@ T060 と T061 は、T010 より前に決める項目として後から追加し�
     Secret取得が0回である。
 
 - [x] T022 契約テスト: 再試行系と重複
-  - 内容: 同じ配信IDの再受信で、引き渡しが二重にならず200（`duplicate`）になること。
+  - 内容: 同じ本文の再受信（配信IDが変わっても同じ `bodyDigest`）で、引き渡しが二重にならず200（`duplicate`）になること。
     処理中の重複が503（`duplicate_in_flight`）になること。引き渡し失敗で503（`handoff_failed`）になり、
-    確保が解放されて、次の同じ配信IDが重複扱いにならないこと。`done` 更新の失敗で確保が解放されること。
+    確保が解放されて、次の同じ本文が重複扱いにならないこと。`done` 更新の失敗で確保が解放されること。
     再試行系の分類が、成功、拒否と区別できること。
   - 対象ファイル: `test/webhook-contract.test.mjs`
   - 依存: T019
@@ -333,10 +333,10 @@ T060 と T061 は、T010 より前に決める項目として後から追加し�
     SDKクライアントを差し替えたテストで、発行されるコマンドが `PutItem`、`UpdateItem`、`DeleteItem` だけである。
     確保の `ConditionExpression` が「項目が無い、または `expiresAt` を過ぎた、または `processing` かつ
     `leaseUntil` を過ぎた」の3条件を含み、`leaseUntil` を過ぎた `processing` を再確保できる。
-    保存される属性が `deliveryId`、`state`、`leaseUntil`、`receivedAt`、`expiresAt` だけで、bodyとヘッダーを含まない。
+    保存される属性が `bodyDigest`（キー）、`deliveryId`（診断用）、`state`、`leaseUntil`、`receivedAt`、`expiresAt` だけで、bodyとヘッダーを含まない。
 
 - [x] T029 後続キューのSQSアダプターを実装する
-  - 内容: `SendMessage` で、T015 の許可リストのメッセージ（`schemaVersion` 1）を送る。送信は `SendMessage` だけを使う。
+  - 内容: `SendMessage` で、T015 の許可リストのメッセージ（`schemaVersion` 1、`bodyDigest` を含む）を送る。送信は `SendMessage` だけを使う。
   - 対象ファイル: `src/webhook/handoff-sqs.ts`（新規）
   - 依存: T010、T015、T032
   - 完了条件: 実装が `corepack pnpm typecheck` を通る。次の挙動は T031 のテストで検査する。
@@ -382,12 +382,12 @@ T060 と T061 は、T010 より前に決める項目として後から追加し�
 
 - [x] T034 SQSキューとDynamoDBテーブルを作る
   - 内容: `WebhookReceiver` Constructに、標準キュー（保持4日、SSE-SQS、非TLSを拒否するキューポリシー、DLQなし）と、
-    DynamoDBテーブル（パーティションキー `deliveryId`、オンデマンド、TTL属性 `expiresAt`、削除ポリシー `DESTROY`）を作る。
-    キューのARNとURLを非機密Outputで出し、説明に「Issue #5は `deliveryId` で冪等に処理する」旨を書く。
+    DynamoDBテーブル（パーティションキー `bodyDigest`、オンデマンド、TTL属性 `expiresAt`、削除ポリシー `DESTROY`）を作る。
+    キューのARNとURLを非機密Outputで出し、説明に「Issue #5は `bodyDigest` で冪等に処理する」旨を書く。
   - 対象ファイル: `cdk/lib/webhook-receiver.ts`（新規）
   - 依存: T028、T029
   - 完了条件: synth結果に標準キュー1つ、テーブル1つがあり、TTL属性が `expiresAt` である。DLQと `RedrivePolicy` が無い。
-    Outputの説明に冪等性の要請が含まれる。
+    テーブルのパーティションキーが `bodyDigest` である。Outputの説明に冪等性の要請（`bodyDigest`）が含まれる。
 
 - [x] T035 Lambda関数、ロググループ、権限を作る
   - 内容: `NodejsFunction`（Node.js 22、タイムアウト3秒、予約同時実行数は設定値）を作る。環境変数にSecret ARN、
@@ -674,8 +674,9 @@ T002 でMinistackでは確認できないと判定された項目があれば、
 | 拒否系 | JSONとして不正なbodyを署名検証後に拒否 | T021、T015 | ローカル |
 | 拒否系 | 拒否時のログ、診断、例外にSecret、トークン、ジョブ内容が無い | T023、T018 | ローカル |
 | 拒否系 | 拒否したいずれの入力でもランナー起動に相当する処理が呼ばれない | T021 | ローカル |
-| 再試行系 | 同じ配信IDの再受信で引き渡しが二重にならず、重複時の応答になる | T022、T017 | ローカル（Ministack: T044） |
-| 再試行系 | 引き渡し失敗で再試行を促す応答、失敗した配信IDは重複扱いにならない | T022、T017 | ローカル |
+| 再試行系 | 同じ本文の再受信（配信IDが変わっても同じ bodyDigest）で引き渡しが二重にならず、重複時の応答になる | T022、T017 | ローカル（Ministack: T044） |
+| 再試行系 | 引き渡し失敗で再試行を促す応答、失敗した本文のキーは重複扱いにならない | T022、T017 | ローカル |
+| 再試行系 | 同じ本文でGUIDだけ違う再送は duplicate、署名失敗は重複排除に書き込まない、SQSの本文に bodyDigest がある | T017、T020、T022（`test/webhook-body-digest.test.mjs`） | ローカル |
 | 再試行系 | 再試行系の診断が、成功、拒否と区別できる分類で記録される | T022、T011 | ローカル |
 | 契約の固定 | 成功、拒否、再試行のステータスと診断分類が契約テストで固定される | T011、T020〜T023 | ローカル |
 | 契約の固定 | ローテーション中に旧版のSecretで署名された配信を拒否しない方式が固定される | T025、T045 | ローカル（実効性はT058） |

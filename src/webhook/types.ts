@@ -43,6 +43,8 @@ export interface SecretSource {
 export interface HandoffMessage {
   schemaVersion: 1;
   deliveryId: string;
+  // 署名対象の生の本文のSHA-256。Issue #5の冪等キー。配信IDは署名対象外で送信側が付け替えられるため冪等キーにしない。
+  bodyDigest: string;
   event: 'workflow_job';
   receivedAt: string;
   action: string;
@@ -71,9 +73,10 @@ export interface DiagnosticSink {
 
 export type DedupeState = 'processing' | 'done';
 
-// 重複排除の1項目。bodyとヘッダーの値は含めない。
+// 重複排除の1項目。キーは bodyDigest。deliveryId は診断用の属性で、キーには使わない。bodyとヘッダーの値は含めない。
 // leaseUntil はエポックのミリ秒、expiresAt は DynamoDB TTL に合わせてエポックの秒。
 export interface DedupeRecord {
+  bodyDigest: string;
   deliveryId: string;
   state: DedupeState;
   leaseUntil: number;
@@ -87,7 +90,7 @@ export interface DedupeStore {
   // 確保の条件（項目が無い、expiresAt を過ぎた、processing かつ leaseUntil を過ぎた）を満たすときだけ書く。
   putIfAvailable(record: DedupeRecord, nowMs: number): Promise<ReserveResult>;
   // leaseUntil が一致する場合だけ done にする。一致しなければ例外を投げる。
-  markDone(deliveryId: string, leaseUntil: number): Promise<void>;
+  markDone(bodyDigest: string, leaseUntil: number): Promise<void>;
   // leaseUntil が一致する場合だけ削除する。一致しなければ何もしない。
-  release(deliveryId: string, leaseUntil: number): Promise<void>;
+  release(bodyDigest: string, leaseUntil: number): Promise<void>;
 }

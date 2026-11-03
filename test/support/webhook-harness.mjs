@@ -83,13 +83,13 @@ if (request.mode === 'exports') {
       results.push(await reserveDelivery(store, op.input));
     } else if (op.op === 'markDone') {
       try {
-        await store.markDone(op.deliveryId, op.leaseUntil);
+        await store.markDone(op.bodyDigest, op.leaseUntil);
         results.push({ ok: true });
       } catch (error) {
         results.push({ ok: false, error: String(error && error.message) });
       }
     } else if (op.op === 'release') {
-      await store.release(op.deliveryId, op.leaseUntil);
+      await store.release(op.bodyDigest, op.leaseUntil);
       results.push({ ok: true });
     }
   }

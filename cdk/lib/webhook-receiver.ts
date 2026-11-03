@@ -39,14 +39,16 @@ export class WebhookReceiver extends Construct {
 
     // 重複排除テーブルは3日で失効する識別子だけを持つ。失われても再配信の重複が起きるだけで、
     // Issue #5が冪等に処理するため、削除ポリシーはDESTROYにする（plan.md のDynamoDB節）。
+    // キーは生の本文のSHA-256。配信IDは再配信で変わりうるため、キーにすると同じ本文の再送を止められない（clarify.md Q-002）。
+    // キーの変更はテーブルの置換になり、既存の項目は失われる（DESTROY）。失われても重複が増えるだけで、Issue #5が処理する。
     this.dedupeTable = new dynamodb.Table(this, 'DedupeTable', {
-      partitionKey: { name: 'deliveryId', type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: 'bodyDigest', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: 'expiresAt',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    // 標準キューは同じメッセージを複数回配信しうる。冪等性はIssue #5が deliveryId で担保する。
+    // 標準キューは同じメッセージを複数回配信しうる。冪等性はIssue #5が bodyDigest で担保する。
     this.handoffQueue = new sqs.Queue(this, 'HandoffQueue', {
       retentionPeriod: HANDOFF_RETENTION,
       encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -130,12 +132,12 @@ export class WebhookReceiver extends Construct {
 
     new cdk.CfnOutput(this, 'HandoffQueueArn', {
       description:
-        '後続キューのARN（Issue #5が消費する）。標準キューのため配信は重複しうる。Issue #5は deliveryId を冪等キーとして処理すること',
+        '後続キューのARN（Issue #5が消費する）。標準キューのため配信は重複しうる。Issue #5は bodyDigest を冪等キーとして処理すること',
       value: this.handoffQueue.queueArn,
     });
     new cdk.CfnOutput(this, 'HandoffQueueUrl', {
       description:
-        '後続キューのURL（Issue #5が消費する）。標準キューのため配信は重複しうる。Issue #5は deliveryId を冪等キーとして処理すること',
+        '後続キューのURL（Issue #5が消費する）。標準キューのため配信は重複しうる。Issue #5は bodyDigest を冪等キーとして処理すること',
       value: this.handoffQueue.queueUrl,
     });
   }

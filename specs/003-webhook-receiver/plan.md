@@ -141,10 +141,11 @@ AWS管理ポリシーは使わず、次の文を `addToPrincipalPolicy` で加�
 
 | 項目 | 内容 |
 | --- | --- |
-| キー | パーティションキー `deliveryId`（文字列。GUID形式を検証した値だけ） |
+| キー | パーティションキー `bodyDigest`（署名対象の生の本文のSHA-256、16進小文字64桁）。配信ID（`deliveryId`）は診断用の属性 |
 | 課金 | オンデマンド |
 | TTL属性 | `expiresAt`（秒単位のUnix時刻）。処理時刻から3日（Q-002） |
-| 属性 | `state`（`processing`、`done`）、`leaseUntil`、`receivedAt`。bodyとヘッダーは保存しない |
+| 属性 | `deliveryId`（診断用）、`state`（`processing`、`done`）、`leaseUntil`、`receivedAt`。bodyとヘッダーは保存しない |
+| キーの計算 | 署名検証の後に、署名の対象と同じバイト列から計算する。計算だけで、書き込みはしない |
 | 確保 | 条件付き `PutItem`。項目が無い、または `expiresAt` を過ぎた、または `state` が `processing` かつ `leaseUntil` を過ぎた場合だけ成功。失敗時は既存項目を返させて状態を判定する。`expiresAt` と `leaseUntil` の役割は `clarify.md` Q-002 に定める |
 | 完了 | `UpdateItem` で `done` にする |
 | 解放 | 受け渡し失敗時に `DeleteItem`（確保した試行の `leaseUntil` が一致する場合だけ） |
@@ -171,7 +172,8 @@ TTLの削除は遅れるため、期限判定は常に書き込み条件と読�
 | 項目 | 型 | 備考 |
 | --- | --- | --- |
 | `schemaVersion` | 数値 | 初版は1。互換性を壊す変更で増やす |
-| `deliveryId` | 文字列 | `X-GitHub-Delivery`。Issue #5の冪等キー |
+| `deliveryId` | 文字列 | `X-GitHub-Delivery`。診断用。署名対象外で送信側が付け替えられるため、冪等キーにはしない |
+| `bodyDigest` | 文字列 | 署名対象の生の本文のSHA-256（16進小文字64桁）。Issue #5の冪等キー |
 | `event` | 文字列 | `workflow_job` のみ（`ping` は渡さない） |
 | `receivedAt` | 文字列 | Lambdaの受信時刻（ISO 8601、UTC） |
 | `action` | 文字列 | `queued`、`in_progress`、`completed`、`waiting`。Issue #5が選別する |
@@ -185,9 +187,10 @@ TTLの削除は遅れるため、期限判定は常に書き込み条件と読�
 #### Issue #5への冪等性の要請
 
 標準キューは同じメッセージを複数回配信しうる。さらに、キュー送信は成功したが重複排除の `done` 更新が失敗した場合、
-受信側は確保を解放して503を返し、GitHubの再配信で同じ配信IDのメッセージがもう一度送られる。
-したがって、Issue #5は `deliveryId` を冪等キーとして、同じメッセージの再受信を無害に処理しなければならない。
-この要請を、キューのOutputの説明と本Specの契約テストの前提に記載する。
+受信側は確保を解放して503を返し、GitHubの再配信で同じ本文のメッセージがもう一度送られる。
+GitHubの再配信では本文が同じになる前提のため、本文のダイジェスト（`bodyDigest`）も同じ値になる（実GitHubでの確認はフェーズ9）。配信IDは署名されず付け替えられるため、判定に使わない。
+したがって、Issue #5は `bodyDigest` を冪等キーとして、同じメッセージの再受信を無害に処理しなければならない。
+`deliveryId` は冪等キーにしない。この要請を、キューのOutputの説明と本Specの契約テストの前提に記載する。
 
 ## 期限判定の仕様（J-1）
 

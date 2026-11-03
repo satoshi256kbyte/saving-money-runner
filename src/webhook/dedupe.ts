@@ -29,7 +29,10 @@ export type ReserveOutcome =
   | { outcome: 'duplicate_in_flight' };
 
 export interface ReserveInput {
+  // 診断用。キーには使わない。
   deliveryId: string;
+  // 署名対象の生の本文のSHA-256。重複排除のキー。
+  bodyDigest: string;
   receivedAtMs: number;
   nowMs: number;
   leaseSeconds: number;
@@ -43,6 +46,7 @@ export async function reserveDelivery(
 ): Promise<ReserveOutcome> {
   const leaseUntil = input.receivedAtMs + input.leaseSeconds * 1000;
   const record: DedupeRecord = {
+    bodyDigest: input.bodyDigest,
     deliveryId: input.deliveryId,
     state: 'processing',
     leaseUntil,
@@ -65,29 +69,29 @@ export function createMemoryDedupeStore(): DedupeStore {
 
   return {
     async putIfAvailable(record, nowMs) {
-      const existing = items.get(record.deliveryId);
+      const existing = items.get(record.bodyDigest);
       if (!isAvailableForReservation(existing, nowMs)) {
         if (existing === undefined) {
           throw new Error('availability rule and stored item disagree');
         }
         return { written: false, existing: { ...existing } };
       }
-      items.set(record.deliveryId, { ...record });
+      items.set(record.bodyDigest, { ...record });
       return { written: true };
     },
 
-    async markDone(deliveryId, leaseUntil) {
-      const existing = items.get(deliveryId);
+    async markDone(bodyDigest, leaseUntil) {
+      const existing = items.get(bodyDigest);
       if (existing?.state !== 'processing' || existing.leaseUntil !== leaseUntil) {
         throw new Error('lease is not held by this attempt');
       }
-      items.set(deliveryId, { ...existing, state: 'done' });
+      items.set(bodyDigest, { ...existing, state: 'done' });
     },
 
-    async release(deliveryId, leaseUntil) {
-      const existing = items.get(deliveryId);
+    async release(bodyDigest, leaseUntil) {
+      const existing = items.get(bodyDigest);
       if (existing?.state === 'processing' && existing.leaseUntil === leaseUntil) {
-        items.delete(deliveryId);
+        items.delete(bodyDigest);
       }
     },
   };

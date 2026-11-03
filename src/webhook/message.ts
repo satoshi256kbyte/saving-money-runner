@@ -35,6 +35,7 @@ export function extractWorkflowJobMessage(
   payload: unknown,
   deliveryId: string,
   receivedAt: string,
+  bodyDigest: string,
 ): ExtractResult {
   if (!isDict(payload)) {
     return invalid();
@@ -60,6 +61,7 @@ export function extractWorkflowJobMessage(
     message: {
       schemaVersion: 1,
       deliveryId,
+      bodyDigest,
       event: 'workflow_job',
       receivedAt,
       action,

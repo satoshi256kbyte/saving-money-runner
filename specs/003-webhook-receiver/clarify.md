@@ -41,7 +41,7 @@ J-5（診断ログの保持期間）の選択肢は `plan.md` の「決定済み
 | 記号 | URL | 確認した内容 |
 | --- | --- | --- |
 | G1 | <https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries> | 署名は `X-Hub-Signature-256`。`sha256=` で始まるHMAC hex digest。UTF-8で扱う。定数時間比較を使う。途中で変更されたpayloadは検証に失敗する |
-| G2 | <https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks> | 10秒以内に2XXを返す。イベント種別とactionを処理前に確認する。リプレイ対策は `X-GitHub-Delivery` で配信の一意性を確認する。再配信でも同じ値になる。IP許可リストは任意で、IPは変更される |
+| G2 | <https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks> | 10秒以内に2XXを返す。イベント種別とactionを処理前に確認する。リプレイ対策は `X-GitHub-Delivery` で配信の一意性を確認する。再配信でも同じ値になる。IP許可リストは任意で、IPは変更される。本Specは重複排除のキーに配信IDを使わず、本文のSHA-256を使う（Q-002） |
 | G3 | <https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries> | GitHubは失敗した配信を自動で再配信しない。10秒を超える応答は失敗として記録される |
 | G4 | <https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks> | 再配信できるのは過去3日以内の配信 |
 | G5 | <https://docs.github.com/en/webhooks/webhook-events-and-payloads> | 配信ヘッダー一覧にタイムスタンプは無い。payloadの上限は25 MB。`ping` は新しいwebhookの作成時に送られる確認用イベントで、GitHub Appsも対象。`workflow_job` のactionは `queued`、`in_progress`、`completed`、`waiting` |
@@ -94,7 +94,7 @@ J-5（診断ログの保持期間）の選択肢は `plan.md` の「決定済み
   Runbookの手順5（R6）は、拒否された配信を再配信で復旧する前提である。
   そのため、数秒〜数分の短い許容時間で拒否すると、正規の再配信を拒否する。
 - 再配信でも `X-GitHub-Delivery` は元の配信と同じ値になる（G2）。
-  配信IDの保持期間（Q-002）が、重複排除によるリプレイ防止の範囲になる。
+  本文のダイジェストを保存する期間（Q-002）が、重複排除によるリプレイ防止の範囲になる。
 - R1 は「受信時刻」と「期限検査」を求める。受信時刻はLambdaが記録できる。
   比較する相手の時刻は、署名対象bodyの中にある `workflow_job` の時刻項目（G8）だけが、改ざんされない値である。
 - 「何秒」という短い許容時間の数値には、GitHub公式にも既存契約にも根拠が無い。選択肢にしない。
@@ -107,18 +107,26 @@ J-5（診断ログの保持期間）の選択肢は `plan.md` の「決定済み
 
 根拠は次のとおり。
 
-- 配信IDは重複排除キーとして使える（G2）。再配信でも同じ値になるため、保持期間は再配信期間3日（G4）を下回れない。
+- 重複排除のキーは、署名対象の生の本文のSHA-256（`bodyDigest`）にする。配信IDは使わない。
+  保持期間は再配信期間3日（G4）を下回れない。
 - SQS FIFOの重複排除は5分間で（A11）、3日間の保持を満たさない。
 - DynamoDBのTTLは削除が遅れるため（A7）、読み取り側で期限を判定する。
+
+変更の理由（当初の既定案は配信IDをキーにしていた）。
+配信ID（`X-GitHub-Delivery`）は署名の対象に含まれない。そのため、取得した署名済みの本文に新しい配信IDを付けて送れば、
+署名検証も重複排除も通過して、同じ本文が2回後続へ渡っていた。キーを本文のダイジェストに変えて、この穴を塞ぐ。
+同じ本文の再送は配信IDが違ってもキーが同じになり、`duplicate` になる。
 
 既定案は次のとおり。
 
 | 項目 | 既定案 |
 | --- | --- |
-| 保存先 | DynamoDB。キーは配信ID（GUID形式を検証したものだけ） |
+| 保存先 | DynamoDB。キーは生の本文のSHA-256（16進小文字64桁、`bodyDigest`）。配信IDは診断用の属性として保存する |
 | 保持期間 | 処理時刻から3日。TTL属性 `expiresAt`（秒単位のUnix時刻）に設定する |
 | 書き込み方式 | 条件付き `PutItem`。確保の条件は次の「状態の遷移」に定める |
-| 保存する項目 | 配信ID、状態（`processing`、`done`）、`expiresAt`、`leaseUntil`、受信時刻。bodyとヘッダーは保存しない |
+| 保存する項目 | `bodyDigest`（キー）、配信ID（`deliveryId`、診断用）、状態（`processing`、`done`）、`expiresAt`、`leaseUntil`、受信時刻。bodyとヘッダーは保存しない |
+| キーの計算 | 署名検証を通過した後に、署名の対象と同じバイト列から計算する。計算だけで、書き込みはしない |
+| 同じ本文と状態の変化 | 同じ本文の再送は、配信IDが違っても同じキーになり `duplicate` になる。状態が変わった配信（`queued`、`in_progress`、`completed` など）は本文が違うため別のキーになり、従来どおり処理される |
 | 記録するタイミング | 署名検証と構文検証を通過した配信だけ。拒否した配信は記録しない（再配信で復旧するため） |
 | 状態の遷移 | 後続の受け渡し前に `processing` で確保する。成功したら `done` にする。失敗したら確保を解放する |
 | 確保の条件 | 項目が無い、または `expiresAt` を過ぎた、または `state` が `processing` かつ `leaseUntil` を過ぎた場合だけ成功させる。それ以外は既存項目を返し、`done` なら `duplicate`、期限内の `processing` なら `duplicate_in_flight` とする |
@@ -134,7 +142,7 @@ J-5（診断ログの保持期間）の選択肢は `plan.md` の「決定済み
 
 - GitHubは2xx以外と10秒超を失敗として記録し、自動では再配信しない（G2、G3）。
   後続の受け渡しや依存先の一時障害には5xxを返す。再配信は運用者が行う（G4）。
-- 失敗した配信IDを重複として扱わない（受け入れ条件）ため、`processing` の確保を解放する（Q-002）。
+- 失敗した本文（bodyDigest）を重複として扱わない（受け入れ条件）ため、`processing` の確保を解放する（Q-002）。
 - R3 は、レート制限と同時実行上限を備えることを必須としている。設定しない選択肢は取れない。
 - 1つのジョブは `queued`、`in_progress`、`completed` の3回（承認待ちがあれば `waiting` を加えて最大4回）の
   `workflow_job` を発生させる（G5）。サブスクリプションではactionを絞れないため、受信側はこの件数を受ける。
@@ -292,7 +300,7 @@ HTTP APIのpayload上限は10 MBだが（A2）、LambdaがAPI Gatewayから同�
 
 | 区分 | 項目 |
 | --- | --- |
-| 受信側が付与 | 配信ID、イベント種別、受信時刻 |
+| 受信側が付与 | bodyDigest、配信ID（診断用）、イベント種別、受信時刻 |
 | payloadから抽出（G8） | `action`、`workflow_job` の `id`、`run_id`、`labels`、`status`、リポジトリのID、リポジトリのフルネーム、`installation` のID、Organizationのログイン名 |
 
 `action` が `queued` の配信だけを後続へ渡し、`in_progress`、`completed`、`waiting` は検証後に200で受理して
@@ -376,7 +384,7 @@ GitHubは2xxとそれ以外しか区別しないため（G2、G3）、具体的�
 
 | 選択肢 | 内容 | メリット | デメリット |
 | --- | --- | --- | --- |
-| A | 期限切れの判定を行わない。重複排除（保持3日）だけでリプレイを防ぐ | 実装が小さい。payloadの時刻項目に依存しない。再配信の拒否が起きない | Issue #4の受け入れ条件「期限切れ」と、`docs/04` のSEC-002「期限検査」を満たさない。保持期間（3日）を過ぎた配信IDは再受理される |
+| A | 期限切れの判定を行わない。重複排除（保持3日）だけでリプレイを防ぐ | 実装が小さい。payloadの時刻項目に依存しない。再配信の拒否が起きない | Issue #4の受け入れ条件「期限切れ」と、`docs/04` のSEC-002「期限検査」を満たさない。保持期間（3日）を過ぎた本文（bodyDigest）は再受理される |
 | B | 受信時刻とpayload内の時刻項目の差が3日を超えた配信を拒否する。時刻項目は `workflow_job` のactionごとに、planで確定する | 受け入れ条件とSEC-002を満たす。3日はGitHubの再配信期間（G4）で、正規の再配信を拒否しない。重複排除の保持期間と同じ3日で、リプレイを防ぐ範囲に隙間が無い。時刻項目は署名対象のbodyの中にあり、改ざんできない | payloadの時刻項目（`created_at`、`started_at`、`completed_at`）がactionによってnullになりうるため、planで項目の選択を確定する必要がある。GitHubとLambdaの時計のずれが3日に比べて十分小さいことを前提にする |
 
 推奨はBである。

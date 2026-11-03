@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 
 import {
@@ -14,6 +15,7 @@ import {
 } from './support/webhook-harness.mjs';
 
 // T012〜T015 と T018 の検査は、純粋関数を1回の子プロセスで実行してまとめて確認する（起動時間を抑えるため）。
+const DIGEST = createHash('sha256').update('units-body').digest('hex');
 const DIGITS = 'a';
 const exactBytes = Buffer.alloc(MAX_BODY_BYTES, DIGITS);
 const oneUnder = Buffer.alloc(MAX_BODY_BYTES - 1, DIGITS);
@@ -213,7 +215,7 @@ const batch = runInChild({
     {
       module: 'message.ts',
       fn: 'extractWorkflowJobMessage',
-      args: [fullPayload, DELIVERY_ID, iso(NOW_MS)],
+      args: [fullPayload, DELIVERY_ID, iso(NOW_MS), DIGEST],
     },
     {
       module: 'message.ts',
@@ -227,6 +229,7 @@ const batch = runInChild({
         }),
         DELIVERY_ID,
         iso(NOW_MS),
+        DIGEST,
       ],
     },
     {
@@ -236,6 +239,7 @@ const batch = runInChild({
         workflowJobPayload({ createdAt: iso(NOW_MS), omit: ['installation', 'organization'] }),
         DELIVERY_ID,
         iso(NOW_MS),
+        DIGEST,
       ],
     },
     {
@@ -245,6 +249,7 @@ const batch = runInChild({
         workflowJobPayload({ createdAt: iso(NOW_MS), omit: ['repository'] }),
         DELIVERY_ID,
         iso(NOW_MS),
+        DIGEST,
       ],
     },
     {
@@ -254,12 +259,13 @@ const batch = runInChild({
         workflowJobPayload({ createdAt: iso(NOW_MS), omit: ['job.labels'] }),
         DELIVERY_ID,
         iso(NOW_MS),
+        DIGEST,
       ],
     },
     {
       module: 'message.ts',
       fn: 'extractWorkflowJobMessage',
-      args: [{ ...fullPayload, installation: 'not-an-object' }, DELIVERY_ID, iso(NOW_MS)],
+      args: [{ ...fullPayload, installation: 'not-an-object' }, DELIVERY_ID, iso(NOW_MS), DIGEST],
     },
     // T018: 診断行のキー
     {
@@ -419,6 +425,7 @@ test('T015: 許可リストの項目だけを出力する。installation と org
   const message = ok(extractOk).message;
   assert.deepEqual(Object.keys(message).sort(), [
     'action',
+    'bodyDigest',
     'deliveryId',
     'event',
     'installationId',
@@ -432,6 +439,7 @@ test('T015: 許可リストの項目だけを出力する。installation と org
     'schemaVersion',
     'status',
   ]);
+  assert.equal(message.bodyDigest, DIGEST);
   assert.equal(message.schemaVersion, 1);
   assert.equal(message.installationId, 4001);
   assert.equal(message.organizationLogin, 'example-org');

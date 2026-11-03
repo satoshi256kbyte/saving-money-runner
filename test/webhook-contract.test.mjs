@@ -29,6 +29,7 @@ const ALLOWED_DIAGNOSTIC_KEYS = [
 ];
 const HANDOFF_KEYS = [
   'action',
+  'bodyDigest',
   'deliveryId',
   'event',
   'installationId',
@@ -57,6 +58,13 @@ const classOf = (step) => JSON.parse(step.body).classification;
 const diagOf = (step) => step.diagnostics.map((line) => JSON.parse(line));
 const freshPayload = (extra = {}) =>
   workflowJobPayload({ createdAt: iso(NOW_MS - 60_000), ...extra });
+// 配信ごとに本文を変える。重複排除は本文のダイジェストで判定するため、同じ本文の別配信は重複になる。
+// 同じ配信の再受信だけは、同じ GUID と同じ本文で作る。
+const bodyOf = (n) => {
+  const payload = freshPayload();
+  payload.workflow_job.id = 2000 + n;
+  return jsonText(payload);
+};
 
 // T011: 契約表の定数が clarify.md の表と一致することを機械的に検査する。
 function parseClarifyContractTable(markdown) {
@@ -295,24 +303,33 @@ test('T021: Secret取得の失敗（不在、権限なし）は503 secret_unavai
 // T022: 再試行系と重複。同じ配信IDの扱いと、確保の解放を検査する。
 const retryRun = handlerRun([
   // 0: 初回は受理する
-  { event: buildRequest({ delivery: deliveryId(40) }) },
+  { event: buildRequest({ text: bodyOf(40), delivery: deliveryId(40) }) },
   // 1: 処理済みの再受信は200 duplicate。引き渡しは増えない
-  { event: buildRequest({ delivery: deliveryId(40) }) },
+  { event: buildRequest({ text: bodyOf(40), delivery: deliveryId(40) }) },
   // 2: 引き渡し中に同じ配信が届く。内側の試行は処理中として503 duplicate_in_flight
   {
-    event: buildRequest({ delivery: deliveryId(41) }),
-    flags: { reenter: buildRequest({ delivery: deliveryId(41) }) },
+    event: buildRequest({ text: bodyOf(41), delivery: deliveryId(41) }),
+    flags: { reenter: buildRequest({ text: bodyOf(41), delivery: deliveryId(41) }) },
   },
   // 3: 引き渡し失敗で503 handoff_failed。確保は解放される
-  { event: buildRequest({ delivery: deliveryId(42) }), flags: { handoffFail: true } },
+  {
+    event: buildRequest({ text: bodyOf(42), delivery: deliveryId(42) }),
+    flags: { handoffFail: true },
+  },
   // 4: 解放されたので、同じ配信IDは新規として受理される
-  { event: buildRequest({ delivery: deliveryId(42) }) },
+  { event: buildRequest({ text: bodyOf(42), delivery: deliveryId(42) }) },
   // 5: done の更新が失敗したら、確保を解放して503 handoff_failed
-  { event: buildRequest({ delivery: deliveryId(43) }), flags: { failMarkDone: true } },
+  {
+    event: buildRequest({ text: bodyOf(43), delivery: deliveryId(43) }),
+    flags: { failMarkDone: true },
+  },
   // 6: 解放されたので、同じ配信IDは再試行で受理される（引き渡しは2回になりうる。Issue #5が冪等に処理する）
-  { event: buildRequest({ delivery: deliveryId(43) }) },
+  { event: buildRequest({ text: bodyOf(43), delivery: deliveryId(43) }) },
   // 7: 想定外の例外（重複排除の書込みが失敗）は500 internal_error
-  { event: buildRequest({ delivery: deliveryId(44) }), flags: { storeFailure: true } },
+  {
+    event: buildRequest({ text: bodyOf(44), delivery: deliveryId(44) }),
+    flags: { storeFailure: true },
+  },
 ]);
 
 test('T022: 初回は202、同じ配信IDの再受信は200 duplicate で、引き渡しは増えない', () => {
@@ -485,8 +502,20 @@ const rotationCurrentOnly = handlerRun([{ event: buildRequest({ delivery: delive
 
 const rotationBoth = handlerRun(
   [
-    { event: buildRequest({ delivery: deliveryId(71), signingValue: SIGNING_VALUE }) },
-    { event: buildRequest({ delivery: deliveryId(72), signingValue: ROTATED_VALUE }) },
+    {
+      event: buildRequest({
+        text: bodyOf(71),
+        delivery: deliveryId(71),
+        signingValue: SIGNING_VALUE,
+      }),
+    },
+    {
+      event: buildRequest({
+        text: bodyOf(72),
+        delivery: deliveryId(72),
+        signingValue: ROTATED_VALUE,
+      }),
+    },
     { event: buildRequest({ delivery: deliveryId(73), signingValue: 'unknown-value-for-tests' }) },
   ],
   { secrets: [SIGNING_VALUE, ROTATED_VALUE] },

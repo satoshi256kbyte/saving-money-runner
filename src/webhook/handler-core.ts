@@ -1,4 +1,5 @@
 import { buildDiagnosticLine } from './diagnostics';
+import { computeBodyDigest } from './body-digest';
 import { checkDeliveryExpiry } from './expiry';
 import { checkRequestHeaders, isValidDeliveryId, normalizeHeaderNames } from './headers';
 import { RESPONSE_CONTRACT } from './contract';
@@ -80,6 +81,10 @@ export function createWebhookHandler(deps: WebhookDependencies) {
         return respond('signature_mismatch', deliveryId);
       }
 
+      // 署名を通過した本文だけ、重複排除のキーを計算する。ここは計算だけで、書き込みはしない。
+      // 同じ署名対象のバイト列から計算するため、配信IDを変えて送り直した同じ本文は同じキーになる。
+      const bodyDigest = computeBodyDigest(body.bytes);
+
       // 順8: JSONとして解釈できるか（ping を含む）
       const parsed = parseJsonBody(body.bytes);
       if (!parsed.ok) return respond('payload_invalid', deliveryId);
@@ -90,14 +95,15 @@ export function createWebhookHandler(deps: WebhookDependencies) {
       // 順10: workflow_job の抽出（許可リスト）と期限判定
       const receivedAtMs = startMs;
       const receivedAt = new Date(receivedAtMs).toISOString();
-      const extracted = extractWorkflowJobMessage(parsed.value, deliveryId, receivedAt);
+      const extracted = extractWorkflowJobMessage(parsed.value, deliveryId, receivedAt, bodyDigest);
       if (!extracted.ok) return respond(extracted.classification, deliveryId);
       const expiry = checkDeliveryExpiry(parsed.value, receivedAtMs);
       if (!expiry.ok) return respond(expiry.classification, deliveryId);
 
-      // 順11: 重複排除の確保
+      // 順11: 重複排除の確保（キーは本文のダイジェスト。配信IDは診断用の属性として保存する）
       const reservation = await reserveDelivery(deps.store, {
         deliveryId,
+        bodyDigest,
         receivedAtMs,
         nowMs: deps.clock.nowMs(),
         leaseSeconds: deps.leaseSeconds,
@@ -114,15 +120,15 @@ export function createWebhookHandler(deps: WebhookDependencies) {
       try {
         await deps.queue.send(extracted.message);
       } catch {
-        await releaseLease(deps.store, deliveryId, lease);
+        await releaseLease(deps.store, bodyDigest, lease);
         return respond('handoff_failed', deliveryId);
       }
       // done の更新に失敗したら、確保を解放して503にする。引き渡し済みの配信は再配信で二重になりうるため、
-      // 後続（Issue #5）が配信IDで冪等に処理する（plan.md の「Issue #5への冪等性の要請」）。
+      // 後続（Issue #5）が bodyDigest で冪等に処理する（plan.md の「Issue #5への冪等性の要請」）。
       try {
-        await deps.store.markDone(deliveryId, lease);
+        await deps.store.markDone(bodyDigest, lease);
       } catch {
-        await releaseLease(deps.store, deliveryId, lease);
+        await releaseLease(deps.store, bodyDigest, lease);
         return respond('handoff_failed', deliveryId);
       }
 
@@ -135,10 +141,10 @@ export function createWebhookHandler(deps: WebhookDependencies) {
   };
 }
 
-// 解放の失敗は握りつぶす。確保の leaseUntil を過ぎれば、同じ配信IDは再確保できるため、影響は次の試行までに限られる。
-async function releaseLease(store: DedupeStore, deliveryId: string, leaseUntil: number) {
+// 解放の失敗は握りつぶす。確保の leaseUntil を過ぎれば、同じ本文のキーは再確保できるため、影響は次の試行までに限られる。
+async function releaseLease(store: DedupeStore, bodyDigest: string, leaseUntil: number) {
   try {
-    await store.release(deliveryId, leaseUntil);
+    await store.release(bodyDigest, leaseUntil);
   } catch {
     // 意図的に無視する。上の理由により、失敗した解放で配信が永久に塞がることは無い。
   }

@@ -7,6 +7,7 @@ import type { HandoffMessage, HandoffQueue } from './types';
 const HANDOFF_FIELDS: Record<keyof HandoffMessage, true> = {
   schemaVersion: true,
   deliveryId: true,
+  bodyDigest: true,
   event: true,
   receivedAt: true,
   action: true,
@@ -35,7 +36,7 @@ export interface SqsHandoffOptions {
 }
 
 // SendMessage を1回だけ使う。失敗は例外のまま渡し、ハンドラーが確保を解放して503にする。
-// 標準キューは配信が重複しうるため、後続（Issue #5）は deliveryId で冪等に処理する（plan.md）。
+// 標準キューは配信が重複しうるため、後続（Issue #5）は bodyDigest で冪等に処理する（plan.md）。
 export function createSqsHandoffQueue(options: SqsHandoffOptions): HandoffQueue {
   return {
     async send(message: HandoffMessage): Promise<void> {

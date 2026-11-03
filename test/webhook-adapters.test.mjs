@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 
 import { runOps } from './support/adapter-harness.mjs';
@@ -22,6 +23,7 @@ const CURRENT_VALUE = 'current-value-for-tests';
 const PENDING_VALUE = 'pending-value-for-tests';
 const ALLOWED_BODY_KEYS = [
   'action',
+  'bodyDigest',
   'deliveryId',
   'event',
   'installationId',
@@ -126,16 +128,18 @@ test('T027: AWSPENDING の不在以外の失敗は、2版を保証できない�
 });
 
 // T028: DynamoDB の重複排除アダプター。偽物は、アダプターが定義した式だけを評価する（Ministack の確認は T044）。
-const record = (deliveryIdValue, leaseUntil, expiresAt, state = 'processing') => ({
-  deliveryId: deliveryIdValue,
+const record = (bodyDigestValue, leaseUntil, expiresAt, state = 'processing') => ({
+  bodyDigest: bodyDigestValue,
+  deliveryId: deliveryId(9),
   state,
   leaseUntil,
   receivedAt: new Date(NOW_MS).toISOString(),
   expiresAt,
 });
-const D1 = deliveryId(1);
-const D2 = deliveryId(2);
-const D3 = deliveryId(3);
+const digestOf = (text) => createHash('sha256').update(text).digest('hex');
+const D1 = digestOf('adapter-body-1');
+const D2 = digestOf('adapter-body-2');
+const D3 = digestOf('adapter-body-3');
 const LEASE_MS = 3000;
 
 const dedupeRun = runOps([
@@ -264,10 +268,11 @@ const dedupeRun = runOps([
 ]);
 const R = dedupeRun.results;
 
-test('T028: 新規の確保は条件付き PutItem で、保存する項目は5つだけ（bodyとヘッダーを含まない）', () => {
+test('T028: 新規の確保は条件付き PutItem で、保存する項目は本文のダイジェストを含む6つだけ（bodyとヘッダーを含まない）', () => {
   assert.deepEqual(ok(R[3]), { written: true });
   const put = dedupeRun.calls.dynamo.find((call) => call.name === 'PutItemCommand');
   assert.deepEqual(Object.keys(put.input.Item).sort(), [
+    'bodyDigest',
     'deliveryId',
     'expiresAt',
     'leaseUntil',
@@ -276,10 +281,10 @@ test('T028: 新規の確保は条件付き PutItem で、保存する項目は5�
   ]);
 });
 
-test('T028: 確保の条件は「項目が無い」「expiresAt を過ぎた」「processing かつ leaseUntil を過ぎた」の3つを含む', () => {
+test('T028: 確保の条件は「項目が無い」「expiresAt を過ぎた」「processing かつ leaseUntil を過ぎた」の3つを含み、キーは bodyDigest', () => {
   const put = dedupeRun.calls.dynamo.find((call) => call.name === 'PutItemCommand');
   const expression = put.input.ConditionExpression;
-  assert.match(expression, /attribute_not_exists\(deliveryId\)/u);
+  assert.match(expression, /attribute_not_exists\(bodyDigest\)/u);
   assert.match(expression, /expiresAt < :nowSeconds/u);
   assert.match(expression, /#state = :processing AND leaseUntil < :nowMs/u);
 });
@@ -329,7 +334,8 @@ test('T028: 発行されたコマンドは PutItem、UpdateItem、DeleteItem だ
 // T029: SQS の送信アダプター。
 const handoffMessage = {
   schemaVersion: 1,
-  deliveryId: D1,
+  deliveryId: deliveryId(1),
+  bodyDigest: D1,
   event: 'workflow_job',
   receivedAt: new Date(NOW_MS).toISOString(),
   action: 'queued',
@@ -452,15 +458,20 @@ test('T030: 必須の環境変数が無いと、読込み（Lambda の初期化�
 
 // T030: 環境変数を与えたハンドラーの結合テスト。SDK の偽物を組み込み、実AWSには接続しない。
 // created_at は実行時刻から1分前にする（期限判定は実行時刻と本文の時刻の差を使うため）。
-const liveText = jsonText(
-  workflowJobPayload({
+// 配信ごとに本文を変える。重複排除は本文のダイジェストで判定するため、同じ本文は別の配信にならない。
+// 作成時刻は1回だけ決める。呼び出しのたびに現在時刻を読むと、同じ配信の再送でも本文が変わってしまう。
+const LIVE_CREATED_AT = new Date(Date.now() - 60_000).toISOString();
+const liveText = (n) => {
+  const payload = workflowJobPayload({
     action: 'queued',
-    createdAt: new Date(Date.now() - 60_000).toISOString(),
+    createdAt: LIVE_CREATED_AT,
     installation: { id: 4002 },
-  }),
-);
+  });
+  payload.workflow_job.id = 1000 + n;
+  return jsonText(payload);
+};
 const deliveryEvent = (n, extra = {}) =>
-  buildRequest({ text: liveText, delivery: deliveryId(n), ...extra });
+  buildRequest({ text: liveText(n), delivery: deliveryId(n), ...extra });
 
 const ALL_CLASSIFICATIONS_RUN = runOps(
   [

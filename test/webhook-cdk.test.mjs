@@ -96,9 +96,9 @@ test('受信Lambdaは Node.js 22、タイムアウト3秒、予約同時実行�
   assert.deepEqual(fn.Properties.LoggingConfig.LogGroup, { Ref: logGroupId });
 });
 
-test('重複排除テーブルは deliveryId を鍵にし、オンデマンド課金とexpiresAtのTTLを持ち、削除ポリシーはDeleteである', () => {
+test('重複排除テーブルは bodyDigest を鍵にし、オンデマンド課金とexpiresAtのTTLを持ち、削除ポリシーはDeleteである', () => {
   const [, table] = onlyOne('AWS::DynamoDB::Table');
-  assert.deepEqual(table.Properties.KeySchema, [{ AttributeName: 'deliveryId', KeyType: 'HASH' }]);
+  assert.deepEqual(table.Properties.KeySchema, [{ AttributeName: 'bodyDigest', KeyType: 'HASH' }]);
   assert.equal(table.Properties.BillingMode, 'PAY_PER_REQUEST');
   assert.deepEqual(table.Properties.TimeToLiveSpecification, {
     AttributeName: 'expiresAt',
@@ -132,10 +132,10 @@ test('GitHubAppWebhookUrl のOutputは、APIのエンドポイントに /webhook
   assert.ok(output.Value['Fn::Join'][1][0]['Fn::GetAtt'], 'エンドポイントをGetAttで参照していない');
 });
 
-test('キューのOutputは、Issue #5が deliveryId で冪等に処理する旨を説明に持つ', () => {
+test('キューのOutputは、Issue #5が bodyDigest で冪等に処理する旨を説明に持つ', () => {
   for (const keyPart of ['HandoffQueueArn', 'HandoffQueueUrl']) {
     const output = findOutput(keyPart);
-    assert.ok(output.Description.includes('deliveryId'), `${keyPart}に deliveryId の説明がない`);
+    assert.ok(output.Description.includes('bodyDigest'), `${keyPart}に bodyDigest の説明がない`);
     assert.ok(output.Description.includes('冪等'), `${keyPart}に冪等性の説明がない`);
   }
 });
