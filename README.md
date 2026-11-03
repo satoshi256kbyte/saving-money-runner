@@ -44,6 +44,7 @@ corepack pnpm lint
 corepack pnpm typecheck
 corepack pnpm test
 corepack pnpm foundation:check
+corepack pnpm security:check
 corepack pnpm docs:check
 corepack pnpm cdk:check
 corepack pnpm ministack:check
