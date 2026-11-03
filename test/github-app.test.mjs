@@ -118,3 +118,111 @@ test('読取りロールは、デプロイ先のAWSアカウントに属する�
   assert.throws(() => assertReaderRolesInAccount(crossAccount, accountA), /一致しません/u);
   assert.throws(() => assertReaderRolesInAccount(sameAccount, undefined), /確認できません/u);
 });
+
+const webhookReceiverSettings = { rateLimit: 10, burstLimit: 20, reservedConcurrency: 5 };
+const requiredWebhookKeys = ['rateLimit', 'burstLimit', 'reservedConcurrency'];
+
+function withWebhookReceiver(webhookReceiver) {
+  return { ...config, webhookReceiver };
+}
+
+test('webhookReceiverの3項目が正の整数の設定を許可する', () => {
+  assert.doesNotThrow(() => validateGitHubAppConfig(withWebhookReceiver(webhookReceiverSettings)));
+});
+
+test('設定例のように3項目がnullの設定を許可する（デプロイ経路の拒否は別に行う）', () => {
+  assert.doesNotThrow(() =>
+    validateGitHubAppConfig(
+      withWebhookReceiver({ rateLimit: null, burstLimit: null, reservedConcurrency: null }),
+    ),
+  );
+});
+
+test('maxBodyBytesを省略した設定と、上限ちょうどの設定を許可する', () => {
+  assert.doesNotThrow(() => validateGitHubAppConfig(withWebhookReceiver(webhookReceiverSettings)));
+  assert.doesNotThrow(() =>
+    validateGitHubAppConfig(
+      withWebhookReceiver({ ...webhookReceiverSettings, maxBodyBytes: 6291456 }),
+    ),
+  );
+});
+
+test('webhookReceiverの欠落を拒否する', () => {
+  const withoutReceiver = { ...config };
+  delete withoutReceiver.webhookReceiver;
+  assert.throws(() => validateGitHubAppConfig(withoutReceiver), /webhookReceiverを指定/u);
+});
+
+test('webhookReceiverが配列やオブジェクト以外の値なら拒否する', () => {
+  assert.throws(() => validateGitHubAppConfig(withWebhookReceiver(null)), /webhookReceiverを指定/u);
+  assert.throws(() => validateGitHubAppConfig(withWebhookReceiver([])), /webhookReceiverを指定/u);
+});
+
+for (const key of requiredWebhookKeys) {
+  test(`webhookReceiver.${key}の欠落を拒否する`, () => {
+    const settings = { ...webhookReceiverSettings };
+    delete settings[key];
+    assert.throws(() => validateGitHubAppConfig(withWebhookReceiver(settings)), /必須項目/u);
+  });
+
+  for (const value of [0, -1, 1.5, '10', true]) {
+    test(`webhookReceiver.${key}に正の整数以外（${JSON.stringify(value)}）を拒否する`, () => {
+      assert.throws(
+        () =>
+          validateGitHubAppConfig(
+            withWebhookReceiver({ ...webhookReceiverSettings, [key]: value }),
+          ),
+        /正の整数またはnull/u,
+      );
+    });
+  }
+}
+
+for (const value of [0, -1, 1.5, '1000', null, 6291457]) {
+  test(`maxBodyBytesに不正な値（${JSON.stringify(value)}）を拒否する`, () => {
+    assert.throws(
+      () =>
+        validateGitHubAppConfig(
+          withWebhookReceiver({ ...webhookReceiverSettings, maxBodyBytes: value }),
+        ),
+      /maxBodyBytes/u,
+    );
+  });
+}
+
+test('burstLimitがrateLimit未満の設定を拒否し、同値は許可する', () => {
+  assert.throws(
+    () =>
+      validateGitHubAppConfig(
+        withWebhookReceiver({ ...webhookReceiverSettings, rateLimit: 10, burstLimit: 9 }),
+      ),
+    /burstLimit/u,
+  );
+  assert.doesNotThrow(() =>
+    validateGitHubAppConfig(
+      withWebhookReceiver({ ...webhookReceiverSettings, rateLimit: 10, burstLimit: 10 }),
+    ),
+  );
+});
+
+test('webhookReceiverの未知のキーを拒否する', () => {
+  assert.throws(
+    () =>
+      validateGitHubAppConfig(withWebhookReceiver({ ...webhookReceiverSettings, unknownLimit: 1 })),
+    /未許可のwebhookReceiver設定キー/u,
+  );
+});
+
+test('webhookReceiverの検証エラーに設定値を含めない', () => {
+  assert.throws(
+    () =>
+      validateGitHubAppConfig(
+        withWebhookReceiver({ ...webhookReceiverSettings, reservedConcurrency: 1.5 }),
+      ),
+    (error) => {
+      assert.match(error.message, /reservedConcurrency/u);
+      assert.doesNotMatch(error.message, /1\.5/u);
+      return true;
+    },
+  );
+});

@@ -30,6 +30,11 @@ export interface GitHubAppIntegrationProps {
   readonly adminRoleArn: string;
   /** Issue #4のWebhook処理など、Secret読取りを追加で許可するロールのARN。 */
   readonly additionalReaderRoleArns?: string[];
+  /**
+   * 同じStackで作るロールを型付きで渡し、Secret読取りを許可する。
+   * デプロイ前はARNがトークンのため、文字列ARNの検証（assertRoleArns）の対象にしない。
+   */
+  readonly webhookReaderRoles?: iam.IRole[];
 }
 
 export class GitHubAppIntegration extends Construct {
@@ -48,11 +53,15 @@ export class GitHubAppIntegration extends Construct {
       },
     });
 
-    const readerRoleArns = [props.adminRoleArn, ...(props.additionalReaderRoleArns ?? [])];
-    assertRoleArns(readerRoleArns);
+    const stringReaderRoleArns = [props.adminRoleArn, ...(props.additionalReaderRoleArns ?? [])];
+    assertRoleArns(stringReaderRoleArns);
+    const readerRoleArns = [
+      ...stringReaderRoleArns,
+      ...(props.webhookReaderRoles ?? []).map((role) => role.roleArn),
+    ];
 
     // 最小権限をリソースポリシーで強制する。IAMポリシーだけでは他の主体による許可を防げないため。
-    // Issue #4のWebhook処理に読取りを許可する場合は、このロールを条件へ追加する。
+    // Webhook処理のロールは webhookReaderRoles で渡し、Denyの除外条件へ入れる。
     this.secretResource.addToResourcePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.DENY,
