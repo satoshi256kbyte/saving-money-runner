@@ -6,8 +6,8 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "format": "prettier --write package.json '*.mjs' 'scripts/**/*.mjs' 'src/**/*.ts' 'cdk/**/*.ts' 'test/**/*.mjs' 'README.md' '.github/**/*.yml' 'cdk.json'",
-    "format:check": "prettier --check package.json '*.mjs' 'scripts/**/*.mjs' 'src/**/*.ts' 'cdk/**/*.ts' 'test/**/*.mjs' 'README.md' '.github/**/*.yml' 'cdk.json'",
+    "format": "prettier --write package.json '*.mjs' 'scripts/**/*.mjs' 'src/**/*.ts' 'cdk/**/*.ts' 'test/**/*.mjs' 'README.md' 'config/**/*.json' '.github/**/*.yml' 'cdk.json'",
+    "format:check": "prettier --check package.json '*.mjs' 'scripts/**/*.mjs' 'src/**/*.ts' 'cdk/**/*.ts' 'test/**/*.mjs' 'README.md' 'config/**/*.json' '.github/**/*.yml' 'cdk.json'",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
@@ -15,9 +15,10 @@
     "cdk:check": "node scripts/quality/run-cdk-check.mjs",
     "ministack:check": "node scripts/quality/check-ministack.mjs",
     "security:check": "node scripts/quality/check-security-baseline.mjs",
+    "github-app:check": "node scripts/github-app/validate-config.mjs config/github-app.example.json",
     "docs:check": "markdownlint-cli2 AGENTS.md README.md 'docs/**/*.md' 'specs/**/*.md'",
     "foundation:check": "node scripts/quality/check-structure.mjs",
-    "quality": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm foundation:check && corepack pnpm security:check && corepack pnpm docs:check && corepack pnpm cdk:check && corepack pnpm ministack:check"
+    "quality": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm foundation:check && corepack pnpm security:check && corepack pnpm github-app:check && corepack pnpm docs:check && corepack pnpm cdk:check && corepack pnpm ministack:check"
   },
   "dependencies": {
     "aws-cdk-lib": "2.177.0",

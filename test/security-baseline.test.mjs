@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   findForbiddenPublicPattern,
@@ -176,4 +177,113 @@ test('Git情報がない場合もリポジトリ配下のテキストを走査�
 test('セキュリティ基準に公開用のAWS識別情報がない', () => {
   const content = readPublicText(root);
   assert.equal(findForbiddenPublicPattern(content), undefined);
+});
+
+test('Git情報がない場合のGitignore解釈がGitの判定と一致する', () => {
+  // 同じ内容のフィクスチャを、Gitあり（判定の正本）とGitなし（フォールバック）の2か所に作る。
+  // 文字クラス、エスケープした空白、ネストした`**`、後勝ちの否定を両方で比べる。
+  const fixture = {
+    '.gitignore': '[ab].txt\nfile\\ name.txt\na/**/c.txt\n!a.txt\n',
+    'a.txt': 'public',
+    'b.txt': 'public',
+    'c.txt': 'public',
+    'd.txt': 'public',
+    'file name.txt': 'public',
+    'a/c.txt': 'public',
+    'a/x/y/c.txt': 'public',
+  };
+  const gitRoot = mkdtempSync(join(tmpdir(), 'security-baseline-git-'));
+  const plainRoot = mkdtempSync(join(tmpdir(), 'security-baseline-plain-'));
+  try {
+    for (const root of [gitRoot, plainRoot]) {
+      for (const [name, content] of Object.entries(fixture)) {
+        mkdirSync(dirname(join(root, name)), { recursive: true });
+        writeFileSync(join(root, name), content);
+      }
+    }
+    const init = spawnSync('git', ['init', '-q'], { cwd: gitRoot, encoding: 'utf8' });
+    assert.equal(init.status, 0, 'git initに失敗した');
+    const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      cwd: gitRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(listed.status, 0, 'git ls-filesに失敗した');
+    const gitView = listed.stdout.split('\n').filter(Boolean).sort();
+    const fallbackView = collectPublicTextPaths(plainRoot).sort();
+    assert.deepEqual(fallbackView, gitView);
+  } finally {
+    rmSync(gitRoot, { recursive: true, force: true });
+    rmSync(plainRoot, { recursive: true, force: true });
+  }
+});
+
+function assertFallbackMatchesGit(fixture) {
+  // 同じ内容を、Gitあり（判定の正本）とGitなし（フォールバック）の2か所に作って比べる。
+  const gitRoot = mkdtempSync(join(tmpdir(), 'security-baseline-git-'));
+  const plainRoot = mkdtempSync(join(tmpdir(), 'security-baseline-plain-'));
+  try {
+    for (const root of [gitRoot, plainRoot]) {
+      for (const [name, content] of Object.entries(fixture)) {
+        mkdirSync(dirname(join(root, name)), { recursive: true });
+        writeFileSync(join(root, name), content);
+      }
+    }
+    const init = spawnSync('git', ['init', '-q'], { cwd: gitRoot, encoding: 'utf8' });
+    assert.equal(init.status, 0, 'git initに失敗した');
+    const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      cwd: gitRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(listed.status, 0, 'git ls-filesに失敗した');
+    const gitView = listed.stdout.split('\n').filter(Boolean).sort();
+    assert.deepEqual(collectPublicTextPaths(plainRoot).sort(), gitView);
+  } finally {
+    rmSync(gitRoot, { recursive: true, force: true });
+    rmSync(plainRoot, { recursive: true, force: true });
+  }
+}
+
+test('ディレクトリ専用規則は同名のファイルに一致せず、祖先ディレクトリの中身を除外する', () => {
+  // 末尾の`/`はディレクトリだけに一致する。`bar`は祖先ディレクトリとして中身を除外する。
+  assertFallbackMatchesGit({
+    '.gitignore': 'foo/\nbar\n',
+    foo: 'public',
+    'qux/foo/x.txt': 'public',
+    'bar/readme.txt': 'public',
+    'bar.txt': 'public',
+    'docs/keep.txt': 'public',
+  });
+});
+
+test('シンボリックリンクはGitと同じく検査対象になり、除外された参照先の内容を漏らさない', () => {
+  // 参照先は.gitignoreで除外される。リンク自体は追跡対象なので、参照先の内容で検査する。
+  const gitRoot = mkdtempSync(join(tmpdir(), 'security-baseline-link-git-'));
+  const plainRoot = mkdtempSync(join(tmpdir(), 'security-baseline-link-plain-'));
+  try {
+    for (const root of [gitRoot, plainRoot]) {
+      writeFileSync(join(root, '.gitignore'), 'secret.txt\n');
+      writeFileSync(join(root, 'secret.txt'), 'public');
+      symlinkSync('secret.txt', join(root, 'linked.txt'));
+    }
+    const init = spawnSync('git', ['init', '-q'], { cwd: gitRoot, encoding: 'utf8' });
+    assert.equal(init.status, 0, 'git initに失敗した');
+    const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      cwd: gitRoot,
+      encoding: 'utf8',
+    });
+    const gitView = listed.stdout.split('\n').filter(Boolean).sort();
+    assert.deepEqual(collectPublicTextPaths(plainRoot).sort(), gitView);
+  } finally {
+    rmSync(gitRoot, { recursive: true, force: true });
+    rmSync(plainRoot, { recursive: true, force: true });
+  }
+});
+
+test('エスケープされた末尾の空白は名前の一部として扱い、通常の末尾空白は無視する', () => {
+  assertFallbackMatchesGit({
+    '.gitignore': 'foo\\ \nbar   \n',
+    'foo ': 'public',
+    foo: 'public',
+    bar: 'public',
+  });
 });
