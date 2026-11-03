@@ -1,0 +1,13 @@
+{
+  "organization": "<ORGANIZATION>",
+  "appName": "saving-money-runner",
+  "visibility": "private",
+  "permissions": {
+    "actions": "read",
+    "metadata": "read"
+  },
+  "webhookEvents": ["workflow_job"],
+  "webhookSecretName": "saving-money-runner/github-app/webhook",
+  "adminRoleArn": "<ADMIN_ROLE_ARN>",
+  "additionalReaderRoleArns": []
+}
